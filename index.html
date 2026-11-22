@@ -104,14 +104,13 @@
 
     // Accretion Ring Flow parameters (differential orbital rotation without individual arrow particles)
     const ACCRETION_RINGS = [
-      { r: 218, width: 8,  speed: 1.15, alpha: 0.55, harmonics: [3, 5], warm: false }, // ISCO / inner photon boundary
-      { r: 232, width: 14, speed: 0.95, alpha: 0.50, harmonics: [2, 4], warm: true  },
-      { r: 255, width: 18, speed: 0.78, alpha: 0.45, harmonics: [3, 4], warm: true  },
-      { r: 288, width: 22, speed: 0.62, alpha: 0.40, harmonics: [2, 3], warm: false },
-      { r: 330, width: 28, speed: 0.48, alpha: 0.35, harmonics: [2, 5], warm: true  },
-      { r: 385, width: 34, speed: 0.38, alpha: 0.28, harmonics: [1, 3], warm: true  },
-      { r: 450, width: 42, speed: 0.29, alpha: 0.22, harmonics: [2, 4], warm: false },
-      { r: 525, width: 50, speed: 0.22, alpha: 0.16, harmonics: [1, 2], warm: true  }  // outer accretion disk rim
+      { r: 216, width: 6,  speed: 1.20, alpha: 0.58, harmonics: [3, 5], warm: false },
+      { r: 228, width: 8,  speed: 1.00, alpha: 0.52, harmonics: [2, 4], warm: true  },
+      { r: 245, width: 11, speed: 0.82, alpha: 0.46, harmonics: [3, 4], warm: true  },
+      { r: 268, width: 14, speed: 0.66, alpha: 0.40, harmonics: [2, 3], warm: false },
+      { r: 300, width: 18, speed: 0.52, alpha: 0.34, harmonics: [2, 5], warm: true  },
+      { r: 340, width: 22, speed: 0.40, alpha: 0.28, harmonics: [1, 3], warm: true  },
+      { r: 390, width: 26, speed: 0.30, alpha: 0.20, harmonics: [2, 4], warm: false }
     ];
 
     function isHomeClockSelected() {
@@ -256,8 +255,8 @@
         ctx.rotate(-22 * Math.PI / 180);
         ctx.globalCompositeOperation = 'screen';
 
-        const rxScale = 1.0 + 0.90 * eLerp;
-        const ryScale = 1.0 - 0.82 * eLerp;
+        const rxScale = 1.0 + 0.65 * eLerp;
+        const ryScale = 1.0 - 0.76 * eLerp;
 
         for (let k = 0; k < ACCRETION_RINGS.length; k++) {
           const ring = ACCRETION_RINGS[k];
@@ -267,10 +266,10 @@
           const baseAlpha = ring.alpha * bhAlpha * eLerp;
           if (baseAlpha <= 0.01) continue;
 
-          const steps = 40;
+          const steps = 72;
           const dTheta = (Math.PI * 2) / steps;
           ctx.lineWidth = ring.width;
-          ctx.lineCap = 'round';
+          ctx.lineCap = 'butt';
 
           for (let i = 0; i < steps; i++) {
             const theta0 = i * dTheta;
@@ -304,11 +303,11 @@
         }
 
         // Relativistic gravitational lensing circular photon ring swirl
-        const haloSteps = 32;
+        const haloSteps = 64;
         const haloDTheta = (Math.PI * 2) / haloSteps;
-        const haloR = 217;
-        ctx.lineWidth = 12;
-        ctx.lineCap = 'round';
+        const haloR = 216;
+        ctx.lineWidth = 8;
+        ctx.lineCap = 'butt';
         for (let i = 0; i < haloSteps; i++) {
           const th0 = i * haloDTheta;
           const th1 = (i + 1) * haloDTheta;
@@ -973,8 +972,6 @@
       }
     }
 
-      requestAnimationFrame(render);
-    }
     requestAnimationFrame(render);
   </script>
 </body>

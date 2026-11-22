@@ -94,17 +94,36 @@ public final class DualWheelHomeView extends View {
         }
     }
 
-    private static final class Orbiter {
-        float angle;
-        float radius;
-        float speed;
-        float infallSpeed;
-        float size;
-        boolean warm;
-        float phase;
-        float trailLen;
-        boolean diskPlane;
+    private static final class AccretionRing {
+        final float radius;
+        final float width;
+        final float speed;
+        final float alpha;
+        final int harmonic1;
+        final int harmonic2;
+        final boolean warm;
+
+        AccretionRing(float radius, float width, float speed, float alpha, int h1, int h2, boolean warm) {
+            this.radius = radius;
+            this.width = width;
+            this.speed = speed;
+            this.alpha = alpha;
+            this.harmonic1 = h1;
+            this.harmonic2 = h2;
+            this.warm = warm;
+        }
     }
+
+    private static final AccretionRing[] ACCRETION_RINGS = new AccretionRing[]{
+            new AccretionRing(218f, 8f, 1.15f, 0.55f, 3, 5, false),
+            new AccretionRing(232f, 14f, 0.95f, 0.50f, 2, 4, true),
+            new AccretionRing(255f, 18f, 0.78f, 0.45f, 3, 4, true),
+            new AccretionRing(288f, 22f, 0.62f, 0.40f, 2, 3, false),
+            new AccretionRing(330f, 28f, 0.48f, 0.35f, 2, 5, true),
+            new AccretionRing(385f, 34f, 0.38f, 0.28f, 1, 3, true),
+            new AccretionRing(450f, 42f, 0.29f, 0.22f, 2, 4, false),
+            new AccretionRing(525f, 50f, 0.22f, 0.16f, 1, 2, true)
+    };
 
     private final Activity activity;
     private final List<WheelCategory> categories = new ArrayList<>();
@@ -160,7 +179,6 @@ public final class DualWheelHomeView extends View {
     private final SimpleDateFormat timeFormat = new SimpleDateFormat("h:mm a", Locale.US);
     private final SimpleDateFormat dateFormat = new SimpleDateFormat("d MMM, EEEE", Locale.US);
 
-    private final Orbiter[] orbiters = new Orbiter[72];
     private LinearGradient eqHorizonGradient;
 
     private final BroadcastReceiver screenPowerReceiver = new BroadcastReceiver() {
@@ -194,7 +212,6 @@ public final class DualWheelHomeView extends View {
         crtOffProgress = 0.0f;
 
         loadAssets();
-        initSparks();
         rebuildCategories();
     }
 
@@ -348,32 +365,6 @@ public final class DualWheelHomeView extends View {
                 new int[]{Color.argb(0, 255, 215, 165), Color.argb(68, 255, 218, 172), Color.argb(0, 255, 215, 165)},
                 new float[]{0f, 0.5f, 1f},
                 Shader.TileMode.CLAMP);
-    }
-
-    private void initSparks() {
-        for (int i = 0; i < orbiters.length; i++) {
-            Orbiter o = new Orbiter();
-            o.diskPlane = (i % 2 == 0);
-            o.angle = (float) ((i / (double) orbiters.length) * Math.PI * 2.0 + (i % 7) * 0.25);
-            if (o.diskPlane) {
-                // Infalling tidal disruption light-flare filaments spiraling into the event horizon
-                o.radius = 214f + (i % 18) * 18f;
-                o.infallSpeed = 24f + (i % 7) * 6.5f;
-                o.speed = 0.42f + (18 - (i % 18)) * 0.028f;
-                o.trailLen = 0.12f + (i % 5) * 0.045f;
-                o.size = 1.25f + (i % 3) * 0.75f;
-            } else {
-                // Relativistic photon-sphere orbiters skimming the gravitational lensing ring
-                o.radius = 214f + (i % 10) * 11f;
-                o.infallSpeed = 6f + (i % 4) * 2.5f;
-                o.speed = 0.32f + (10 - (i % 10)) * 0.032f;
-                o.trailLen = 0.08f + (i % 4) * 0.035f;
-                o.size = 1.05f + (i % 3) * 0.65f;
-            }
-            o.warm = (i % 4 != 0);
-            o.phase = i * 1.7f;
-            orbiters[i] = o;
-        }
     }
 
     private Intent getBestLaunchIntent(PackageManager pm, String pkg) {
@@ -1155,58 +1146,82 @@ public final class DualWheelHomeView extends View {
             canvas.restore();
         }
 
-        // 6. Moving Part: Infalling Tidal Disruption Light-Flare Streaks & Photon Orbiters (-22 deg angled plane)
-        canvas.save();
-        canvas.translate(cx, cy);
-        canvas.rotate(-22f);
-        for (int i = 0; i < orbiters.length; i++) {
-            Orbiter p = orbiters[i];
-            // Accelerate angular velocity as plasma spirals closer to the event horizon (Keplerian + relativistic infall)
-            float radialBoost = Math.max(1.0f, 320f / Math.max(210f, p.radius));
-            p.angle = (float) ((p.angle + p.speed * radialBoost * dt) % (Math.PI * 2.0));
-            p.radius -= p.infallSpeed * dt;
-            if (p.radius < 208f) {
-                p.radius = p.diskPlane ? (390f + (i % 14) * 22f) : (265f + (i % 8) * 12f);
-            }
+        // 6. Animated Luminous Accretion Rings Swirl (differential rotation of the glowing rings of light without individual arrow particles)
+        if (eLerp > 0.02f) {
+            canvas.save();
+            canvas.translate(cx, cy);
+            canvas.rotate(-22f);
 
-            // Fade in smoothly at outer capture radius and fade out right as it crosses the event horizon (r = 209)
-            float horizonFade = Math.min(1f, Math.max(0f, (p.radius - 208f) / 18f));
-            float outerFade = Math.min(1f, Math.max(0f, (680f - p.radius) / 140f));
-            float flicker = (0.60f + 0.40f * (float) Math.sin(animTimeSec * 3.4f + p.phase)) * horizonFade * outerFade * bhAlpha;
-            if (flicker <= 0.02f) continue;
-
-            float rxScale = p.diskPlane ? (1.0f + 0.92f * eLerp) : 1.02f;
-            float ryScale = p.diskPlane ? (1.0f - 0.82f * eLerp) : 1.02f;
-
-            float rx1 = p.radius * rxScale;
-            float ry1 = p.radius * ryScale;
-            float x1 = (float) Math.cos(p.angle) * rx1;
-            float y1 = (float) Math.sin(p.angle) * ry1;
-            if ((x1 * x1 + y1 * y1) < 211f * 211f && topLerp > 0.25f) continue;
-
-            float prevR = p.radius + p.infallSpeed * 0.08f;
-            float rx0 = prevR * rxScale;
-            float ry0 = prevR * ryScale;
-            float x0 = (float) Math.cos(p.angle - p.trailLen) * rx0;
-            float y0 = (float) Math.sin(p.angle - p.trailLen) * ry0;
+            float rxScale = 1.0f + 0.90f * eLerp;
+            float ryScale = 1.0f - 0.82f * eLerp;
 
             paint.reset();
             paint.setAntiAlias(true);
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setStrokeWidth(p.size);
-            if (p.warm) {
-                paint.setColor(Color.argb(Math.round(135f * flicker), 255, 220, 168));
-            } else {
-                paint.setColor(Color.argb(Math.round(105f * flicker), 255, 185, 115));
-            }
-            canvas.drawLine(x0, y0, x1, y1, paint);
 
-            paint.setStyle(Paint.Style.FILL);
-            paint.setColor(Color.argb(Math.round(205f * flicker), 255, 248, 236));
-            canvas.drawCircle(x1, y1, p.size * 0.65f, paint);
+            for (AccretionRing ring : ACCRETION_RINGS) {
+                float rx = ring.radius * rxScale;
+                float ry = ring.radius * ryScale;
+                float baseAlpha = ring.alpha * bhAlpha * eLerp;
+                if (baseAlpha <= 0.01f) continue;
+
+                paint.setStrokeWidth(ring.width);
+                int steps = 40;
+                float dTheta = (float) (Math.PI * 2.0 / steps);
+
+                for (int i = 0; i < steps; i++) {
+                    float theta0 = i * dTheta;
+                    float theta1 = (i + 1) * dTheta;
+                    float midTheta = (theta0 + theta1) * 0.5f;
+
+                    // Relativistic harmonic plasma waves flowing smoothly along the ring
+                    float wave1 = (float) Math.sin(ring.harmonic1 * midTheta - animTimeSec * ring.speed * 2.2f);
+                    float wave2 = (float) Math.cos(ring.harmonic2 * midTheta - animTimeSec * ring.speed * 1.4f);
+                    float flowDensity = 0.52f + 0.30f * wave1 + 0.18f * wave2;
+
+                    // Relativistic Doppler beaming: left side (approaching, sin < 0) is brighter/whiter
+                    float doppler = 1.0f - 0.45f * (float) Math.sin(midTheta);
+                    float segAlpha = Math.min(1.0f, Math.max(0.0f, baseAlpha * flowDensity * doppler));
+                    int a = Math.round(segAlpha * 255f);
+                    if (a <= 3) continue;
+
+                    if (ring.warm) {
+                        paint.setColor(Color.argb(a, 255, 215, 142));
+                    } else {
+                        paint.setColor(Color.argb(Math.min(255, Math.round(a * 1.12f)), 255, 245, 222));
+                    }
+
+                    float x0 = (float) Math.cos(theta0) * rx;
+                    float y0 = (float) Math.sin(theta0) * ry;
+                    float x1 = (float) Math.cos(theta1) * rx;
+                    float y1 = (float) Math.sin(theta1) * ry;
+
+                    canvas.drawLine(x0, y0, x1, y1, paint);
+                }
+            }
+
+            // Relativistic gravitational lensing circular photon ring swirl
+            int haloSteps = 32;
+            float haloDTheta = (float) (Math.PI * 2.0 / haloSteps);
+            float haloR = 217f;
+            paint.setStrokeWidth(12f);
+            rectF.set(-haloR, -haloR, haloR, haloR);
+            for (int i = 0; i < haloSteps; i++) {
+                float th0 = i * haloDTheta;
+                float th1 = (i + 1) * haloDTheta;
+                float midTh = (th0 + th1) * 0.5f;
+                float haloFlow = 0.55f + 0.45f * (float) Math.sin(3.0 * midTh - animTimeSec * 1.35f);
+                float hAlpha = Math.min(1.0f, Math.max(0.0f, 0.36f * haloFlow * bhAlpha * eLerp));
+                int ha = Math.round(hAlpha * 255f);
+                if (ha <= 3) continue;
+
+                paint.setColor(Color.argb(ha, 255, 230, 178));
+                canvas.drawArc(rectF, (float) Math.toDegrees(th0), (float) Math.toDegrees(haloDTheta), false, paint);
+            }
+
+            canvas.restore();
         }
-        canvas.restore();
 
         // 7. Photorealistic Interstellar ENDURANCE Spacecraft:
         //    - On Home Screen: rotates continuously clockwise at a noticeable speed (0.72 rad/s ≈ 41 deg/s) at (1410, 815).
