@@ -783,8 +783,7 @@ public final class DualWheelHomeView extends View {
                 return true;
 
             case KeyEvent.KEYCODE_DPAD_LEFT:
-                // On Home Clock, clicking Left/Right does NOT shrink the clock or activate wheels
-                if ("clock".equals(getCurrentItem().iconType)) {
+                if ("clock".equals(getCurrentItem().iconType) || isStartupClockMode) {
                     return true;
                 }
                 rightWheelActive = false;
@@ -792,8 +791,19 @@ public final class DualWheelHomeView extends View {
                 return true;
 
             case KeyEvent.KEYCODE_DPAD_RIGHT:
-                // On Home Clock, clicking Left/Right does NOT shrink the clock or activate wheels
-                if ("clock".equals(getCurrentItem().iconType)) {
+                if ("clock".equals(getCurrentItem().iconType) || isStartupClockMode) {
+                    for (int i = 0; i < categories.size(); i++) {
+                        if ("apps".equals(categories.get(i).id)) {
+                            leftIndex = i;
+                            break;
+                        }
+                    }
+                    rightWheelActive = true;
+                    isStartupClockMode = false;
+                    heroPopProgress = 0.0f;
+                    topDeckWheelTarget += 1.0f;
+                    playSoundEffect(SoundEffectConstants.NAVIGATION_RIGHT);
+                    invalidate();
                     return true;
                 }
                 rightWheelActive = true;
@@ -804,9 +814,19 @@ public final class DualWheelHomeView extends View {
             case KeyEvent.KEYCODE_ENTER:
             case KeyEvent.KEYCODE_NUMPAD_ENTER:
                 playSoundEffect(SoundEffectConstants.CLICK);
-                if ("clock".equals(getCurrentItem().iconType)) {
-                    // Clicking OK/Enter on the Home Clock triggers the CRT TV power off switch!
-                    startCrtPowerOff();
+                if ("clock".equals(getCurrentItem().iconType) || isStartupClockMode) {
+                    // Clicking OK/Enter on the Home Clock switches directly into the Apps wheel!
+                    for (int i = 0; i < categories.size(); i++) {
+                        if ("apps".equals(categories.get(i).id)) {
+                            leftIndex = i;
+                            break;
+                        }
+                    }
+                    rightWheelActive = true;
+                    isStartupClockMode = false;
+                    heroPopProgress = 0.0f;
+                    topDeckWheelTarget += 1.0f;
+                    invalidate();
                     return true;
                 }
                 if (!rightWheelActive) {
@@ -945,6 +965,7 @@ public final class DualWheelHomeView extends View {
                 isTvPoweredOn = false;
                 canvas.drawColor(Color.BLACK);
                 canvas.restore();
+                HomeKeyService.goToSleep();
                 return;
             }
         }

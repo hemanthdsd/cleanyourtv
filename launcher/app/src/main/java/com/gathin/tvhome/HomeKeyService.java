@@ -271,7 +271,11 @@ public class HomeKeyService extends AccessibilityService {
                             if (!m.find()) continue;
                             String keyStr = m.group(1);
                             String scanStr = m.group(2);
-                            if ("POWER".equals(keyStr) || "TV_POWER".equals(keyStr) || "SLEEP".equals(keyStr)) {
+                            if ("POWER".equals(keyStr) || "KEYCODE_POWER".equals(keyStr) || "26".equals(keyStr)
+                                    || "TV_POWER".equals(keyStr) || "KEYCODE_TV_POWER".equals(keyStr) || "177".equals(keyStr)
+                                    || "SLEEP".equals(keyStr) || "KEYCODE_SLEEP".equals(keyStr) || "223".equals(keyStr)
+                                    || "SOFT_SLEEP".equals(keyStr) || "KEYCODE_SOFT_SLEEP".equals(keyStr) || "276".equals(keyStr)
+                                    || "116".equals(scanStr)) {
                                 handler.post(() -> sendBroadcast(
                                         new Intent("com.gathin.tvhome.ACTION_POWER_KEY").setPackage(getPackageName())));
                             }
@@ -356,6 +360,14 @@ public class HomeKeyService extends AccessibilityService {
 
     @Override
     protected boolean onKeyEvent(KeyEvent event) {
+        int keyCode = event.getKeyCode();
+        if (keyCode == KeyEvent.KEYCODE_POWER || keyCode == KeyEvent.KEYCODE_TV_POWER
+                || keyCode == KeyEvent.KEYCODE_SLEEP || keyCode == KeyEvent.KEYCODE_SOFT_SLEEP
+                || event.getScanCode() == 116) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                sendBroadcast(new Intent("com.gathin.tvhome.ACTION_POWER_KEY").setPackage(getPackageName()));
+            }
+        }
         // power_on_home: the first key after power-on hands the TV to the user (power and wake keys don't count).
         if (powerOnUntil != 0 && event.getAction() == KeyEvent.ACTION_DOWN
                 && event.getKeyCode() != KeyEvent.KEYCODE_POWER && event.getKeyCode() != KeyEvent.KEYCODE_WAKEUP) {
@@ -467,6 +479,14 @@ public class HomeKeyService extends AccessibilityService {
     static void openPowerMenu() {
         HomeKeyService service = running;
         if (service != null) service.performGlobalAction(GLOBAL_ACTION_POWER_DIALOG);
+    }
+
+    /** Put the TV into standby / screen off using AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN */
+    public static void goToSleep() {
+        HomeKeyService service = running;
+        if (service != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            service.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN);
+        }
     }
 
     static boolean powerOnRedirect(String liveTv, CharSequence pkg, long now, long armedUntil) {

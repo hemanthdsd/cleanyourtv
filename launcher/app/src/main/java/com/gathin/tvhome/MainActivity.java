@@ -1447,6 +1447,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (resumed && event.getKeyCode() >= 1000 && RemoteKeys.handle(this, event, homeAppKeys.get(event.getKeyCode()),
                 homeHoldAppKeys.get(event.getKeyCode()))) return true;
         if (dualWheelView != null) {
+            int keyCode = event.getKeyCode();
+            if (keyCode == KeyEvent.KEYCODE_POWER || keyCode == KeyEvent.KEYCODE_TV_POWER
+                    || keyCode == KeyEvent.KEYCODE_SLEEP || keyCode == KeyEvent.KEYCODE_SOFT_SLEEP
+                    || event.getScanCode() == 116) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    dualWheelView.startCrtPowerOff();
+                    return true;
+                }
+            }
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 if (dualWheelView.onKeyDown(event.getKeyCode(), event)) return true;
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
