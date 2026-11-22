@@ -10,11 +10,14 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.BlendMode;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
 import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
@@ -23,6 +26,7 @@ import android.media.tv.TvContract;
 import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
 import android.net.Uri;
+import android.os.Build;
 import android.provider.Settings;
 import android.view.KeyEvent;
 import android.view.SoundEffectConstants;
@@ -94,9 +98,34 @@ public final class DualWheelHomeView extends View {
         }
     }
 
-    // 36 seamless Structure-Tensor optical-flow + golden bokeh + deep-space frames (7.0s realistic loop)
-    private static final int BH_FRAME_COUNT = 36;
+    // 28 high-res cropped (1216x640 -> 1520x800 OLED-black) optical-flow + golden bokeh frames (7.0s loop)
+    private static final int BH_FRAME_COUNT = 28;
     private static final float BH_FLOW_LOOP_SEC = 7.0f;
+    private static final float BH_CROP_X = 200f;
+    private static final float BH_CROP_Y = 116f;
+    private static final float BH_CROP_W = 1520f;
+    private static final float BH_CROP_H = 800f;
+
+    private static final class BgStar {
+        final float x, y, size, baseAlpha, period, phase;
+        final int r, g, b;
+        final boolean isGlint;
+
+        BgStar(float x, float y, float size, int r, int g, int b, float baseAlpha, float period, float phase, boolean isGlint) {
+            this.x = x; this.y = y; this.size = size;
+            this.r = r; this.g = g; this.b = b;
+            this.baseAlpha = baseAlpha; this.period = period; this.phase = phase;
+            this.isGlint = isGlint;
+        }
+    }
+
+    private final List<BgStar> bgStars = new ArrayList<>();
+    private float nextMeteorSec = 3.0f;
+    private boolean meteorActive = false;
+    private float meteorStartSec, meteorDur, meteorSx, meteorSy, meteorVx, meteorVy;
+    private RadialGradient millerHaloGrad, millerLitGrad;
+    private RadialGradient mannHaloGrad, mannLitGrad;
+    private RadialGradient shipBeaconGrad;
 
     private final Activity activity;
     private final List<WheelCategory> categories = new ArrayList<>();
@@ -137,7 +166,6 @@ public final class DualWheelHomeView extends View {
 
     private final Bitmap[] bhFlowFrames = new Bitmap[BH_FRAME_COUNT];
     private volatile boolean bhFramesReady = false;
-    private Bitmap deepSpaceBgBitmap;
     private Bitmap bhTopAlphaBitmap;
     private Bitmap enduranceShipBitmap;
     private final RectF bhDstRect = new RectF();
@@ -148,6 +176,7 @@ public final class DualWheelHomeView extends View {
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint bitmapPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final Paint bhAddPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint glowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
@@ -322,20 +351,78 @@ public final class DualWheelHomeView extends View {
             }
         }
 
-        // Load Deep-Space backdrop + 36 seamless optical-flow bokeh Black Hole frames + Endurance Spacecraft
+        // Configure GPU additive blend paint for pure OLED-black frame compositing & exact linear crossfade
+        if (Build.VERSION.SDK_INT >= 29) {
+            bhAddPaint.setBlendMode(BlendMode.PLUS);
+        } else {
+            bhAddPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.ADD));
+        }
+
+        // Initialize crisp native 1080p pinprick deep-space starfield (zero blurred upscaled JPEGs!)
+        bgStars.clear();
+        Random starRng = new Random(42019L);
+        for (int i = 0; i < 155; i++) {
+            float sx = 60f + starRng.nextFloat() * 1800f;
+            float sy = 40f + starRng.nextFloat() * 1000f;
+            float d = (float) Math.hypot(sx - 960f, sy - 516f);
+            if (d < 255f) continue;
+            float r = starRng.nextFloat();
+            float sz = r < 0.72f ? (0.85f + starRng.nextFloat() * 0.55f)
+                    : (r < 0.94f ? (1.4f + starRng.nextFloat() * 0.55f) : (2.0f + starRng.nextFloat() * 0.5f));
+            boolean glint = r >= 0.955f;
+            float cRoll = starRng.nextFloat();
+            int cr = cRoll < 0.30f ? 205 : (cRoll < 0.72f ? 252 : 255);
+            int cg = cRoll < 0.30f ? 226 : (cRoll < 0.72f ? 250 : 224);
+            int cb = cRoll < 0.30f ? 255 : (cRoll < 0.72f ? 245 : 178);
+            bgStars.add(new BgStar(
+                    sx, sy, sz, cr, cg, cb,
+                    0.30f + starRng.nextFloat() * 0.62f,
+                    7.0f + starRng.nextFloat() * 7.0f,
+                    starRng.nextFloat() * (float) (Math.PI * 2.0),
+                    glint));
+        }
+
+        // Pre-allocate shaders for minimalist backlit Miller's Planet (r=34) & Mann's Ice World (r=13)
+        float mr = 34f;
+        millerHaloGrad = new RadialGradient(
+                mr * 0.45f, 0f, mr * 1.48f,
+                new int[]{Color.argb(88, 255, 224, 176), Color.argb(26, 130, 185, 235), Color.argb(0, 0, 0, 0)},
+                new float[]{0.48f, 0.74f, 1.0f},
+                Shader.TileMode.CLAMP);
+        millerLitGrad = new RadialGradient(
+                mr * 0.72f, 0f, mr * 1.05f,
+                new int[]{Color.argb(242, 255, 224, 176), Color.argb(92, 130, 185, 235), Color.BLACK},
+                new float[]{0.05f, 0.45f, 1.0f},
+                Shader.TileMode.CLAMP);
+
+        float nr = 13f;
+        mannHaloGrad = new RadialGradient(
+                nr * 0.45f, 0f, nr * 1.48f,
+                new int[]{Color.argb(84, 215, 234, 255), Color.argb(24, 120, 165, 225), Color.argb(0, 0, 0, 0)},
+                new float[]{0.48f, 0.74f, 1.0f},
+                Shader.TileMode.CLAMP);
+        mannLitGrad = new RadialGradient(
+                nr * 0.72f, 0f, nr * 1.05f,
+                new int[]{Color.argb(242, 215, 234, 255), Color.argb(90, 120, 165, 225), Color.BLACK},
+                new float[]{0.05f, 0.45f, 1.0f},
+                Shader.TileMode.CLAMP);
+
+        shipBeaconGrad = new RadialGradient(
+                0f, 0f, 14f,
+                new int[]{Color.argb(220, 255, 234, 188), Color.argb(0, 255, 190, 110)},
+                new float[]{0f, 1f},
+                Shader.TileMode.CLAMP);
+
+        // Load 28 crisp high-res cropped (1216x640 OLED-black) Gargantua frames + Endurance Spacecraft
         BitmapFactory.Options rgb565Opts = new BitmapFactory.Options();
         rgb565Opts.inPreferredConfig = Bitmap.Config.RGB_565;
 
-        try (InputStream is = activity.getAssets().open("deep_space_bg.jpg")) {
-            deepSpaceBgBitmap = BitmapFactory.decodeStream(is, null, rgb565Opts);
-        } catch (Exception ignored) {
-        }
         try (InputStream is = activity.getAssets().open("bh_frames/bh_00.jpg")) {
             bhFlowFrames[0] = BitmapFactory.decodeStream(is, null, rgb565Opts);
         } catch (Exception ignored) {
         }
 
-        // Decode remaining 35 optical-flow frames asynchronously on a background thread for instant cold startup
+        // Decode remaining 27 high-res cropped frames asynchronously for instant cold startup
         new Thread(() -> {
             BitmapFactory.Options bgOpts = new BitmapFactory.Options();
             bgOpts.inPreferredConfig = Bitmap.Config.RGB_565;
@@ -1091,42 +1178,177 @@ public final class DualWheelHomeView extends View {
         }
     }
 
+    private void drawQuietCosmosMicroDetails(Canvas canvas, float alphaScale) {
+        if (alphaScale <= 0.01f) return;
+
+        // 1. Crisp Native 1080p Pinprick Starfield (breathing ultra-slowly over 7-14s, zero blur!)
+        paint.reset();
+        paint.setAntiAlias(true);
+        for (int i = 0; i < bgStars.size(); i++) {
+            BgStar s = bgStars.get(i);
+            float breath = 0.62f + 0.38f * (float) Math.sin((animTimeSec / s.period) * Math.PI * 2.0 + s.phase);
+            int a = Math.min(255, Math.max(0, Math.round(s.baseAlpha * breath * alphaScale * 255f)));
+            if (a <= 2) continue;
+
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(Color.argb(a, s.r, s.g, s.b));
+            canvas.drawCircle(s.x, s.y, s.size, paint);
+
+            if (s.isGlint) {
+                float arm = 7.5f + 3.5f * breath;
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(0.95f);
+                paint.setColor(Color.argb(Math.round(a * 0.55f), s.r, s.g, s.b));
+                canvas.drawLine(s.x - arm, s.y, s.x + arm, s.y, paint);
+                canvas.drawLine(s.x, s.y - arm, s.x, s.y + arm, paint);
+            }
+        }
+
+        // 2. Minimalist Backlit Miller's Planet (upper-left, razor-sharp crescent illuminated by Gargantua)
+        float millerAngle = (float) Math.toDegrees(Math.atan2(516f - 232f, 960f - 392f));
+        drawCrescentPlanet(canvas, 392f, 232f, 34f, millerAngle, millerHaloGrad, millerLitGrad,
+                Color.argb(Math.round(215 * alphaScale), 255, 224, 176), 1.5f, alphaScale);
+
+        // 3. Distant Tiny Mann's Ice World (upper-right, backlit silver-blue crescent facing Gargantua)
+        float mannAngle = (float) Math.toDegrees(Math.atan2(516f - 228f, 960f - 1522f));
+        drawCrescentPlanet(canvas, 1522f, 228f, 13f, mannAngle, mannHaloGrad, mannLitGrad,
+                Color.argb(Math.round(215 * alphaScale), 215, 234, 255), 1.1f, alphaScale);
+
+        // 4. Rare, Refined Shooting Star (once every ~9 seconds across a distant corner)
+        if (animTimeSec >= nextMeteorSec && !meteorActive) {
+            int quad = ((int) animTimeSec) % 3;
+            meteorSx = quad == 0 ? 260f : (quad == 1 ? 1420f : 1220f);
+            meteorSy = quad == 0 ? 140f : (quad == 1 ? 130f : 860f);
+            meteorVx = quad == 0 ? 440f : (quad == 1 ? -460f : 380f);
+            meteorVy = quad == 0 ? 190f : (quad == 1 ? 210f : -160f);
+            meteorStartSec = animTimeSec;
+            meteorDur = 0.72f;
+            meteorActive = true;
+            nextMeteorSec = animTimeSec + 8.5f + (animTimeSec % 3.5f);
+        }
+        if (meteorActive) {
+            float p = (animTimeSec - meteorStartSec) / meteorDur;
+            if (p >= 1.0f || p < 0f) {
+                meteorActive = false;
+            } else {
+                float fade = (float) Math.sin(p * Math.PI) * alphaScale;
+                float hx = meteorSx + meteorVx * p;
+                float hy = meteorSy + meteorVy * p;
+                float tx = meteorSx + meteorVx * Math.max(0f, p - 0.22f);
+                float ty = meteorSy + meteorVy * Math.max(0f, p - 0.22f);
+
+                paint.reset();
+                paint.setAntiAlias(true);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeCap(Paint.Cap.ROUND);
+                paint.setStrokeWidth(1.6f);
+                paint.setShader(new LinearGradient(
+                        tx, ty, hx, hy,
+                        new int[]{
+                                Color.argb(0, 255, 226, 180),
+                                Color.argb(Math.round(120 * fade), 255, 232, 192),
+                                Color.argb(Math.round(245 * fade), 255, 252, 244)
+                        },
+                        new float[]{0f, 0.7f, 1f},
+                        Shader.TileMode.CLAMP));
+                canvas.drawLine(tx, ty, hx, hy, paint);
+                paint.setShader(null);
+
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(Color.argb(Math.round(245 * fade), 255, 255, 255));
+                canvas.drawCircle(hx, hy, 1.8f, paint);
+            }
+        }
+    }
+
+    private void drawCrescentPlanet(Canvas canvas, float px, float py, float r, float lightDeg,
+                                    RadialGradient haloGrad, RadialGradient litGrad,
+                                    int rimColor, float rimStroke, float alphaScale) {
+        canvas.save();
+        canvas.translate(px, py);
+        canvas.rotate(lightDeg);
+
+        int alpha255 = Math.min(255, Math.max(0, Math.round(alphaScale * 255f)));
+
+        // Subtle atmospheric halo on sunlit limb facing Gargantua
+        if (haloGrad != null) {
+            paint.reset();
+            paint.setAntiAlias(true);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setShader(haloGrad);
+            paint.setAlpha(alpha255);
+            canvas.drawCircle(0f, 0f, r * 1.5f, paint);
+            paint.setShader(null);
+        }
+
+        // Clipped planet disc with pitch-black shadowed hemisphere + luminous backlit crescent
+        canvas.save();
+        path.reset();
+        path.addCircle(0f, 0f, r, Path.Direction.CW);
+        canvas.clipPath(path);
+
+        if (litGrad != null) {
+            paint.reset();
+            paint.setAntiAlias(true);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setShader(litGrad);
+            paint.setAlpha(alpha255);
+            canvas.drawRect(-r, -r, r, r, paint);
+            paint.setShader(null);
+        }
+
+        paint.reset();
+        paint.setAntiAlias(true);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(Color.BLACK);
+        canvas.drawCircle(-r * 0.22f, 0f, r * 0.96f, paint);
+        canvas.restore();
+
+        // Crisp luminous rim arc along the sunlit edge
+        paint.reset();
+        paint.setAntiAlias(true);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeCap(Paint.Cap.ROUND);
+        paint.setStrokeWidth(rimStroke);
+        paint.setColor(rimColor);
+        rectF.set(-r, -r, r, r);
+        canvas.drawArc(rectF, -54f, 108f, false, paint);
+
+        canvas.restore();
+    }
+
     private void drawWallpaperAndSparks(Canvas canvas, float dt, float bhAlpha) {
         float cx = 960f;
         float cy = 516f;
         float eLerp = Math.max(0f, Math.min(1f, startupLerp));
         float topLerp = 1.0f - eLerp;
 
-        // 1. Pure Pitch-Black Cosmic Void base
-        canvas.drawColor(Color.rgb(2, 2, 4));
+        // 1. Pure True OLED / Mini-LED Black Void (#000000) + Razor-Sharp Native 1080p Space Micro-Details
+        canvas.drawColor(Color.BLACK);
+        drawQuietCosmosMicroDetails(canvas, bhAlpha);
 
-        // 2. Deep-Space Starfield & Nebula + Top-View Black Hole Ring (Apps screen & morph transition)
-        if (topLerp > 0.005f) {
-            if (deepSpaceBgBitmap != null) {
-                bhDstRect.set(0f, 0f, 1920f, 1080f);
-                bitmapPaint.setAlpha(Math.min(255, Math.max(0, Math.round(255f * bhAlpha))));
-                canvas.drawBitmap(deepSpaceBgBitmap, null, bhDstRect, bitmapPaint);
-            }
-            if (bhTopAlphaBitmap != null) {
-                canvas.save();
-                canvas.translate(cx, cy);
-                float deg = (float) Math.toDegrees(animTimeSec * 0.08f * (0.35f + 0.65f * topLerp));
-                canvas.rotate(deg);
-                bitmapPaint.setAlpha(Math.min(255, Math.max(0, Math.round(topLerp * 255f * bhAlpha))));
-                canvas.drawBitmap(bhTopAlphaBitmap, -cx, -cy, bitmapPaint);
-                canvas.restore();
-            }
+        // 2. Top-View Black Hole Ring (Apps screen & morph transition)
+        if (topLerp > 0.005f && bhTopAlphaBitmap != null) {
+            canvas.save();
+            canvas.translate(cx, cy);
+            float deg = (float) Math.toDegrees(animTimeSec * 0.08f * (0.35f + 0.65f * topLerp));
+            canvas.rotate(deg);
+            bitmapPaint.setAlpha(Math.min(255, Math.max(0, Math.round(topLerp * 255f * bhAlpha))));
+            canvas.drawBitmap(bhTopAlphaBitmap, -cx, -cy, bitmapPaint);
+            bitmapPaint.setAlpha(255);
+            canvas.restore();
         }
 
-        // 3. 7.0s Seamless Optical-Flow + Golden Bokeh + Deep-Space Gargantua (60 FPS Frame Crossfade)
+        // 3. Razor-Sharp Cropped High-Res Gargantua (7.0s optical-flow golden bokeh, exact GPU additive crossfade)
         if (eLerp > 0.005f && bhFlowFrames[0] != null) {
             canvas.save();
             canvas.translate(cx, cy);
             float scaleX = 0.65f + 0.35f * eLerp;
             float scaleY = 0.96f + 0.04f * eLerp;
             canvas.scale(scaleX, scaleY);
-            bhDstRect.set(-cx, -cy, 1920f - cx, 1080f - cy);
+            bhDstRect.set(BH_CROP_X - cx, BH_CROP_Y - cy, BH_CROP_X + BH_CROP_W - cx, BH_CROP_Y + BH_CROP_H - cy);
 
+            float baseAlpha = eLerp * bhAlpha;
             if (bhFramesReady) {
                 float pos = ((animTimeSec / BH_FLOW_LOOP_SEC) % 1.0f) * BH_FRAME_COUNT;
                 if (pos < 0f) pos += BH_FRAME_COUNT;
@@ -1137,27 +1359,34 @@ public final class DualWheelHomeView extends View {
                 Bitmap f0 = bhFlowFrames[i0] != null ? bhFlowFrames[i0] : bhFlowFrames[0];
                 Bitmap f1 = bhFlowFrames[i1] != null ? bhFlowFrames[i1] : f0;
 
-                float baseAlpha = eLerp * bhAlpha;
-                bitmapPaint.setAlpha(Math.min(255, Math.max(0, Math.round(baseAlpha * 255f))));
-                canvas.drawBitmap(f0, null, bhDstRect, bitmapPaint);
-
                 if (f1 != f0 && frac > 0.005f) {
-                    bitmapPaint.setAlpha(Math.min(255, Math.max(0, Math.round(frac * baseAlpha * 255f))));
-                    canvas.drawBitmap(f1, null, bhDstRect, bitmapPaint);
+                    int a0 = Math.min(255, Math.max(0, Math.round((1.0f - frac) * baseAlpha * 255f)));
+                    int a1 = Math.min(255, Math.max(0, Math.round(frac * baseAlpha * 255f)));
+                    if (a0 > 0) {
+                        bhAddPaint.setAlpha(a0);
+                        canvas.drawBitmap(f0, null, bhDstRect, bhAddPaint);
+                    }
+                    if (a1 > 0) {
+                        bhAddPaint.setAlpha(a1);
+                        canvas.drawBitmap(f1, null, bhDstRect, bhAddPaint);
+                    }
+                } else {
+                    bhAddPaint.setAlpha(Math.min(255, Math.max(0, Math.round(baseAlpha * 255f))));
+                    canvas.drawBitmap(f0, null, bhDstRect, bhAddPaint);
                 }
             } else {
-                bitmapPaint.setAlpha(Math.min(255, Math.max(0, Math.round(eLerp * 255f * bhAlpha))));
-                canvas.drawBitmap(bhFlowFrames[0], null, bhDstRect, bitmapPaint);
+                bhAddPaint.setAlpha(Math.min(255, Math.max(0, Math.round(baseAlpha * 255f))));
+                canvas.drawBitmap(bhFlowFrames[0], null, bhDstRect, bhAddPaint);
             }
-            bitmapPaint.setAlpha(255);
+            bhAddPaint.setAlpha(255);
             canvas.restore();
         }
 
-        // 4. Opaque Pitch-Black Event Horizon Sphere (r = 209px)
+        // 4. Opaque True-Black Event Horizon Sphere (r = 209px)
         paint.reset();
         paint.setAntiAlias(true);
         paint.setStyle(Paint.Style.FILL);
-        paint.setColor(Color.rgb(2, 2, 4));
+        paint.setColor(Color.BLACK);
         canvas.drawCircle(cx, cy, 209f, paint);
 
         // 5. Angled (-22 deg) Equatorial Accretion Glow across the Event Horizon in Clock Mode
@@ -1179,12 +1408,13 @@ public final class DualWheelHomeView extends View {
         }
 
         // 7. Photorealistic Interstellar ENDURANCE Spacecraft:
-        //    - On Home Screen: rotates continuously clockwise at a noticeable speed (0.72 rad/s ≈ 41 deg/s) at (1410, 815).
+        //    - On Home Screen: rotates continuously clockwise at a noticeable speed (0.62 rad/s) at (1410, 815)
+        //      with a subtle warm pulsing docking navigation beacon.
         //    - When toggling Apps: seamlessly exits rotating clockwise to the right AND morphs/sweeps into the enlarged
         //      circular deck at the top center (960, -185, size 790x790), rotating in sync with the wheels!
         if (enduranceShipBitmap != null) {
             float appLerp = 1.0f - eLerp;
-            float cwSpinRad = animTimeSec * 0.72f;
+            float cwSpinRad = animTimeSec * 0.62f;
 
             // Phase A: Home foreground ship (1410, 815) -> exits rotating clockwise to the right as appLerp goes 0 -> 1
             float exitT = Math.max(0f, Math.min(1f, appLerp * 1.42f));
@@ -1202,6 +1432,22 @@ public final class DualWheelHomeView extends View {
                 bitmapPaint.setAlpha(Math.min(255, Math.max(0, Math.round(shipAlpha * 255f))));
                 rectF.set(-halfSz, -halfSz, halfSz, halfSz);
                 canvas.drawBitmap(enduranceShipBitmap, null, rectF, bitmapPaint);
+                bitmapPaint.setAlpha(255);
+
+                // Subtle warm pulsing spacecraft navigation beacon on Endurance central hub
+                if (shipBeaconGrad != null) {
+                    float pulse = (float) Math.pow(0.5 + 0.5 * Math.sin(animTimeSec * 2.1), 3.0);
+                    int bAlpha = Math.round(pulse * shipAlpha * 230f);
+                    if (bAlpha > 8) {
+                        paint.reset();
+                        paint.setAntiAlias(true);
+                        paint.setStyle(Paint.Style.FILL);
+                        paint.setShader(shipBeaconGrad);
+                        paint.setAlpha(bAlpha);
+                        canvas.drawCircle(0f, 0f, 14f, paint);
+                        paint.setShader(null);
+                    }
+                }
                 canvas.restore();
             }
 
