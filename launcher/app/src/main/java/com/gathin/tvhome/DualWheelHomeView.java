@@ -94,36 +94,9 @@ public final class DualWheelHomeView extends View {
         }
     }
 
-    private static final class AccretionRing {
-        final float radius;
-        final float width;
-        final float speed;
-        final float alpha;
-        final int harmonic1;
-        final int harmonic2;
-        final boolean warm;
-
-        AccretionRing(float radius, float width, float speed, float alpha, int h1, int h2, boolean warm) {
-            this.radius = radius;
-            this.width = width;
-            this.speed = speed;
-            this.alpha = alpha;
-            this.harmonic1 = h1;
-            this.harmonic2 = h2;
-            this.warm = warm;
-        }
-    }
-
-    private static final AccretionRing[] ACCRETION_RINGS = new AccretionRing[]{
-            new AccretionRing(218f, 8f, 1.15f, 0.55f, 3, 5, false),
-            new AccretionRing(232f, 14f, 0.95f, 0.50f, 2, 4, true),
-            new AccretionRing(255f, 18f, 0.78f, 0.45f, 3, 4, true),
-            new AccretionRing(288f, 22f, 0.62f, 0.40f, 2, 3, false),
-            new AccretionRing(330f, 28f, 0.48f, 0.35f, 2, 5, true),
-            new AccretionRing(385f, 34f, 0.38f, 0.28f, 1, 3, true),
-            new AccretionRing(450f, 42f, 0.29f, 0.22f, 2, 4, false),
-            new AccretionRing(525f, 50f, 0.22f, 0.16f, 1, 2, true)
-    };
+    // 36 seamless Structure-Tensor optical-flow + golden bokeh + deep-space frames (7.0s realistic loop)
+    private static final int BH_FRAME_COUNT = 36;
+    private static final float BH_FLOW_LOOP_SEC = 7.0f;
 
     private final Activity activity;
     private final List<WheelCategory> categories = new ArrayList<>();
@@ -162,9 +135,12 @@ public final class DualWheelHomeView extends View {
     private String cachedDateStr = "";
     private int cachedTzOffsetMs = 0;
 
-    private Bitmap bhEdgeAlphaBitmap;
+    private final Bitmap[] bhFlowFrames = new Bitmap[BH_FRAME_COUNT];
+    private volatile boolean bhFramesReady = false;
+    private Bitmap deepSpaceBgBitmap;
     private Bitmap bhTopAlphaBitmap;
     private Bitmap enduranceShipBitmap;
+    private final RectF bhDstRect = new RectF();
     private RadialGradient shipBackscatterGrad;
     private Typeface brushTypeface;
     private Typeface sansTypeface;
@@ -346,8 +322,34 @@ public final class DualWheelHomeView extends View {
             }
         }
 
-        // Load Screen-Alpha Angled (-22 deg) Black Hole layers + Interstellar Endurance Spacecraft
-        bhEdgeAlphaBitmap = loadLuminanceAlphaBitmap("bh_edge.jpg");
+        // Load Deep-Space backdrop + 36 seamless optical-flow bokeh Black Hole frames + Endurance Spacecraft
+        BitmapFactory.Options rgb565Opts = new BitmapFactory.Options();
+        rgb565Opts.inPreferredConfig = Bitmap.Config.RGB_565;
+
+        try (InputStream is = activity.getAssets().open("deep_space_bg.jpg")) {
+            deepSpaceBgBitmap = BitmapFactory.decodeStream(is, null, rgb565Opts);
+        } catch (Exception ignored) {
+        }
+        try (InputStream is = activity.getAssets().open("bh_frames/bh_00.jpg")) {
+            bhFlowFrames[0] = BitmapFactory.decodeStream(is, null, rgb565Opts);
+        } catch (Exception ignored) {
+        }
+
+        // Decode remaining 35 optical-flow frames asynchronously on a background thread for instant cold startup
+        new Thread(() -> {
+            BitmapFactory.Options bgOpts = new BitmapFactory.Options();
+            bgOpts.inPreferredConfig = Bitmap.Config.RGB_565;
+            for (int i = 1; i < BH_FRAME_COUNT; i++) {
+                String path = String.format(Locale.US, "bh_frames/bh_%02d.jpg", i);
+                try (InputStream is = activity.getAssets().open(path)) {
+                    bhFlowFrames[i] = BitmapFactory.decodeStream(is, null, bgOpts);
+                } catch (Exception ignored) {
+                }
+            }
+            bhFramesReady = true;
+            postInvalidateOnAnimation();
+        }, "bh-frame-loader").start();
+
         bhTopAlphaBitmap = loadLuminanceAlphaBitmap("bh_top.jpg");
         try (InputStream is = activity.getAssets().open("endurance_ship.png")) {
             enduranceShipBitmap = BitmapFactory.decodeStream(is);
@@ -1095,29 +1097,59 @@ public final class DualWheelHomeView extends View {
         float eLerp = Math.max(0f, Math.min(1f, startupLerp));
         float topLerp = 1.0f - eLerp;
 
-        // 1. Pure Pitch-Black Cosmic Void (realistic Black Hole environment with zero background stars or mountains)
+        // 1. Pure Pitch-Black Cosmic Void base
         canvas.drawColor(Color.rgb(2, 2, 4));
 
-        // 2. Screen-Alpha Photorealistic Top-View Black Hole Ring (rotates gently around (960, 516))
-        if (bhTopAlphaBitmap != null && topLerp > 0.005f) {
-            canvas.save();
-            canvas.translate(cx, cy);
-            float deg = (float) Math.toDegrees(animTimeSec * 0.08f * (0.35f + 0.65f * topLerp));
-            canvas.rotate(deg);
-            bitmapPaint.setAlpha(Math.min(255, Math.max(0, Math.round(255f * bhAlpha))));
-            canvas.drawBitmap(bhTopAlphaBitmap, -cx, -cy, bitmapPaint);
-            canvas.restore();
+        // 2. Deep-Space Starfield & Nebula + Top-View Black Hole Ring (Apps screen & morph transition)
+        if (topLerp > 0.005f) {
+            if (deepSpaceBgBitmap != null) {
+                bhDstRect.set(0f, 0f, 1920f, 1080f);
+                bitmapPaint.setAlpha(Math.min(255, Math.max(0, Math.round(255f * bhAlpha))));
+                canvas.drawBitmap(deepSpaceBgBitmap, null, bhDstRect, bitmapPaint);
+            }
+            if (bhTopAlphaBitmap != null) {
+                canvas.save();
+                canvas.translate(cx, cy);
+                float deg = (float) Math.toDegrees(animTimeSec * 0.08f * (0.35f + 0.65f * topLerp));
+                canvas.rotate(deg);
+                bitmapPaint.setAlpha(Math.min(255, Math.max(0, Math.round(topLerp * 255f * bhAlpha))));
+                canvas.drawBitmap(bhTopAlphaBitmap, -cx, -cy, bitmapPaint);
+                canvas.restore();
+            }
         }
 
-        // 3. Screen-Alpha Photorealistic -22 deg Angled Black Hole with Infalling Tidal Light Flare
-        if (bhEdgeAlphaBitmap != null && eLerp > 0.005f) {
+        // 3. 7.0s Seamless Optical-Flow + Golden Bokeh + Deep-Space Gargantua (60 FPS Frame Crossfade)
+        if (eLerp > 0.005f && bhFlowFrames[0] != null) {
             canvas.save();
             canvas.translate(cx, cy);
             float scaleX = 0.65f + 0.35f * eLerp;
             float scaleY = 0.96f + 0.04f * eLerp;
             canvas.scale(scaleX, scaleY);
-            bitmapPaint.setAlpha(Math.min(255, Math.max(0, Math.round(eLerp * 255f * bhAlpha))));
-            canvas.drawBitmap(bhEdgeAlphaBitmap, -cx, -cy, bitmapPaint);
+            bhDstRect.set(-cx, -cy, 1920f - cx, 1080f - cy);
+
+            if (bhFramesReady) {
+                float pos = ((animTimeSec / BH_FLOW_LOOP_SEC) % 1.0f) * BH_FRAME_COUNT;
+                if (pos < 0f) pos += BH_FRAME_COUNT;
+                int i0 = ((int) Math.floor(pos)) % BH_FRAME_COUNT;
+                int i1 = (i0 + 1) % BH_FRAME_COUNT;
+                float frac = pos - (float) Math.floor(pos);
+
+                Bitmap f0 = bhFlowFrames[i0] != null ? bhFlowFrames[i0] : bhFlowFrames[0];
+                Bitmap f1 = bhFlowFrames[i1] != null ? bhFlowFrames[i1] : f0;
+
+                float baseAlpha = eLerp * bhAlpha;
+                bitmapPaint.setAlpha(Math.min(255, Math.max(0, Math.round(baseAlpha * 255f))));
+                canvas.drawBitmap(f0, null, bhDstRect, bitmapPaint);
+
+                if (f1 != f0 && frac > 0.005f) {
+                    bitmapPaint.setAlpha(Math.min(255, Math.max(0, Math.round(frac * baseAlpha * 255f))));
+                    canvas.drawBitmap(f1, null, bhDstRect, bitmapPaint);
+                }
+            } else {
+                bitmapPaint.setAlpha(Math.min(255, Math.max(0, Math.round(eLerp * 255f * bhAlpha))));
+                canvas.drawBitmap(bhFlowFrames[0], null, bhDstRect, bitmapPaint);
+            }
+            bitmapPaint.setAlpha(255);
             canvas.restore();
         }
 
@@ -1143,83 +1175,6 @@ public final class DualWheelHomeView extends View {
             paint.setAlpha(Math.min(255, Math.round(eLerp * 255f * bhAlpha)));
             canvas.drawRect(-215f, -26f, 215f, 52f, paint);
             paint.setShader(null);
-            canvas.restore();
-        }
-
-        // 6. Animated Luminous Accretion Rings Swirl (differential rotation of the glowing rings of light without individual arrow particles)
-        if (eLerp > 0.02f) {
-            canvas.save();
-            canvas.translate(cx, cy);
-            canvas.rotate(-22f);
-
-            float rxScale = 1.0f + 0.90f * eLerp;
-            float ryScale = 1.0f - 0.82f * eLerp;
-
-            paint.reset();
-            paint.setAntiAlias(true);
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeCap(Paint.Cap.ROUND);
-
-            for (AccretionRing ring : ACCRETION_RINGS) {
-                float rx = ring.radius * rxScale;
-                float ry = ring.radius * ryScale;
-                float baseAlpha = ring.alpha * bhAlpha * eLerp;
-                if (baseAlpha <= 0.01f) continue;
-
-                paint.setStrokeWidth(ring.width);
-                int steps = 40;
-                float dTheta = (float) (Math.PI * 2.0 / steps);
-
-                for (int i = 0; i < steps; i++) {
-                    float theta0 = i * dTheta;
-                    float theta1 = (i + 1) * dTheta;
-                    float midTheta = (theta0 + theta1) * 0.5f;
-
-                    // Relativistic harmonic plasma waves flowing smoothly along the ring
-                    float wave1 = (float) Math.sin(ring.harmonic1 * midTheta - animTimeSec * ring.speed * 2.2f);
-                    float wave2 = (float) Math.cos(ring.harmonic2 * midTheta - animTimeSec * ring.speed * 1.4f);
-                    float flowDensity = 0.52f + 0.30f * wave1 + 0.18f * wave2;
-
-                    // Relativistic Doppler beaming: left side (approaching, sin < 0) is brighter/whiter
-                    float doppler = 1.0f - 0.45f * (float) Math.sin(midTheta);
-                    float segAlpha = Math.min(1.0f, Math.max(0.0f, baseAlpha * flowDensity * doppler));
-                    int a = Math.round(segAlpha * 255f);
-                    if (a <= 3) continue;
-
-                    if (ring.warm) {
-                        paint.setColor(Color.argb(a, 255, 215, 142));
-                    } else {
-                        paint.setColor(Color.argb(Math.min(255, Math.round(a * 1.12f)), 255, 245, 222));
-                    }
-
-                    float x0 = (float) Math.cos(theta0) * rx;
-                    float y0 = (float) Math.sin(theta0) * ry;
-                    float x1 = (float) Math.cos(theta1) * rx;
-                    float y1 = (float) Math.sin(theta1) * ry;
-
-                    canvas.drawLine(x0, y0, x1, y1, paint);
-                }
-            }
-
-            // Relativistic gravitational lensing circular photon ring swirl
-            int haloSteps = 32;
-            float haloDTheta = (float) (Math.PI * 2.0 / haloSteps);
-            float haloR = 217f;
-            paint.setStrokeWidth(12f);
-            rectF.set(-haloR, -haloR, haloR, haloR);
-            for (int i = 0; i < haloSteps; i++) {
-                float th0 = i * haloDTheta;
-                float th1 = (i + 1) * haloDTheta;
-                float midTh = (th0 + th1) * 0.5f;
-                float haloFlow = 0.55f + 0.45f * (float) Math.sin(3.0 * midTh - animTimeSec * 1.35f);
-                float hAlpha = Math.min(1.0f, Math.max(0.0f, 0.36f * haloFlow * bhAlpha * eLerp));
-                int ha = Math.round(hAlpha * 255f);
-                if (ha <= 3) continue;
-
-                paint.setColor(Color.argb(ha, 255, 230, 178));
-                canvas.drawArc(rectF, (float) Math.toDegrees(th0), (float) Math.toDegrees(haloDTheta), false, paint);
-            }
-
             canvas.restore();
         }
 
