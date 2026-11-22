@@ -1314,9 +1314,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onPause() {
         super.onPause();
-        if (dualWheelView != null) {
-            dualWheelView.onTvScreenOff();
-        }
         resumed = false;
         // No UP reaches a paused Home, so a vendor-key hold it saw go down would still open its app later.
         // Only Home's own share is dropped: a key service that saw the same DOWN keeps its hold.
@@ -1346,9 +1343,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onStop() {
         super.onStop();
-        if (dualWheelView != null) {
-            dualWheelView.onTvScreenOff();
-        }
         started = false;
         unregisterReceiver(timeReceiver);
         clockRefresh.stop();

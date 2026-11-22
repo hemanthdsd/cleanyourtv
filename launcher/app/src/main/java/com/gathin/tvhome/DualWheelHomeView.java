@@ -167,8 +167,10 @@ public final class DualWheelHomeView extends View {
         @Override
         public void onReceive(Context context, Intent intent) {
             String action = intent != null ? intent.getAction() : "";
-            if (Intent.ACTION_SCREEN_OFF.equals(action) || "com.gathin.tvhome.ACTION_POWER_KEY".equals(action)) {
+            if ("com.gathin.tvhome.ACTION_POWER_KEY".equals(action)) {
                 startCrtPowerOff();
+            } else if (Intent.ACTION_SCREEN_OFF.equals(action)) {
+                onTvScreenOff();
             } else if (Intent.ACTION_SCREEN_ON.equals(action)) {
                 onTvScreenOn();
             }
@@ -204,6 +206,10 @@ public final class DualWheelHomeView extends View {
     }
 
     public void triggerTvPowerOn() {
+        if (isTvPoweredOn && !isCrtPoweringOff) {
+            // Already powered on and running; prevent duplicate entrance re-trigger glitch!
+            return;
+        }
         isTvPoweredOn = true;
         isCrtPoweringOff = false;
         crtOffProgress = 0.0f;
