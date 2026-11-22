@@ -23,10 +23,14 @@ import android.view.ViewConfiguration;
 import android.view.accessibility.AccessibilityEvent;
 import android.widget.Toast;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Sends the remote's Home button to this launcher on remotes that emit KEYCODE_ALL_APPS for Home
@@ -93,6 +97,12 @@ public class HomeKeyService extends AccessibilityService {
     /** The bound helper, so the opt-in broadcast can arm it without waiting for a new connection. */
     private static HomeKeyService running;
 
+    private volatile boolean logReaderRunning = false;
+    private Process logcatProcess;
+    private Thread logReaderThread;
+    private static final Pattern KEY_LOG_PATTERN = Pattern.compile(
+            "handleKeyBeforeQueueing.*action=ACTION_DOWN,\\s*keyCode=([A-Za-z0-9_]+),\\s*scanCode=([0-9]+),.*repeatCount=0\\b");
+
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
@@ -150,6 +160,7 @@ public class HomeKeyService extends AccessibilityService {
         }
         if (gamepads != null) gamepads.stop();
         if (consumeVolumeKeys) VolumeKeys.stop();
+        stopKeyLogReader();
         super.onDestroy();
     }
 
@@ -235,6 +246,97 @@ public class HomeKeyService extends AccessibilityService {
         if (config.gamepadPassthrough && config.keyFilter && gamepads == null) {
             gamepads = new GamepadPassthrough(this);
             gamepads.start();
+        }
+        startKeyLogReader();
+    }
+
+    private void startKeyLogReader() {
+        if (logReaderRunning) return;
+        logReaderRunning = true;
+        logReaderThread = new Thread(() -> {
+            while (logReaderRunning) {
+                Process proc = null;
+                try {
+                    proc = new ProcessBuilder("logcat", "-v", "brief", "-T", "1", "-s", "WindowManager:D")
+                            .redirectErrorStream(true)
+                            .start();
+                    logcatProcess = proc;
+                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream()))) {
+                        String line;
+                        while (logReaderRunning && (line = reader.readLine()) != null) {
+                            if (!line.contains("handleKeyBeforeQueueing") || !line.contains("ACTION_DOWN")) {
+                                continue;
+                            }
+                            Matcher m = KEY_LOG_PATTERN.matcher(line);
+                            if (!m.find()) continue;
+                            String keyStr = m.group(1);
+                            String scanStr = m.group(2);
+                            if ("POWER".equals(keyStr) || "TV_POWER".equals(keyStr) || "SLEEP".equals(keyStr)) {
+                                handler.post(() -> sendBroadcast(
+                                        new Intent("com.gathin.tvhome.ACTION_POWER_KEY").setPackage(getPackageName())));
+                            }
+                            String target = null;
+                            try {
+                                int scan = Integer.parseInt(scanStr);
+                                if (scan > 0) {
+                                    target = inFront(appScancodes, frontAppScancodes, scan);
+                                }
+                            } catch (NumberFormatException ignored) {
+                            }
+                            if (target == null && keyStr != null) {
+                                int code = 0;
+                                try {
+                                    code = Integer.parseInt(keyStr);
+                                } catch (NumberFormatException notNum) {
+                                    code = KeyEvent.keyCodeFromString(
+                                            keyStr.startsWith("KEYCODE_") ? keyStr : ("KEYCODE_" + keyStr));
+                                }
+                                if (code > 0) {
+                                    target = inFront(appKeys, frontAppKeys, code);
+                                }
+                            }
+                            if (target != null && !target.isEmpty()) {
+                                final String launchTarget = target;
+                                handler.post(() -> RemoteKeys.launch(HomeKeyService.this, launchTarget));
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {
+                } finally {
+                    if (proc != null) {
+                        try {
+                            proc.destroy();
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
+                if (logReaderRunning) {
+                    try {
+                        Thread.sleep(1000L);
+                    } catch (InterruptedException ie) {
+                        break;
+                    }
+                }
+            }
+        }, "TclKeyLogReader");
+        logReaderThread.setDaemon(true);
+        logReaderThread.start();
+    }
+
+    private void stopKeyLogReader() {
+        logReaderRunning = false;
+        Process proc = logcatProcess;
+        if (proc != null) {
+            try {
+                proc.destroy();
+            } catch (Exception ignored) {
+            }
+            logcatProcess = null;
+        }
+        Thread t = logReaderThread;
+        if (t != null) {
+            t.interrupt();
+            logReaderThread = null;
         }
     }
 

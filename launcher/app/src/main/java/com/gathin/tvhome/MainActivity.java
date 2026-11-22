@@ -143,6 +143,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private AppAdapter adapter;
     private RecyclerView grid;
     private FrameLayout root;
+    private DualWheelHomeView dualWheelView;
     private WallpaperPlayer wallpaperPlayer;
     private GlassView glass;
     private View ambient;
@@ -965,6 +966,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (savedInstanceState == null && !openLauncherSettingsIfAsked(getIntent()) && !openLibraryIfAsked(getIntent())) {
             openInputsIfAsked(getIntent());
         }
+
+        // Mount custom Dual-Wheel Mandala + Moonlit Mountain Canyon + Rising Fire Sparks UI
+        for (int i = 0; i < root.getChildCount(); i++) {
+            root.getChildAt(i).setVisibility(View.GONE);
+        }
+        dualWheelView = new DualWheelHomeView(this);
+        root.addView(dualWheelView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        dualWheelView.requestFocus();
     }
 
     /**
@@ -1141,6 +1152,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 handler.postDelayed(this::playPetalShower, 450);
             }
         }
+        if (dualWheelView != null) {
+            dualWheelView.onTvScreenOn();
+            dualWheelView.requestFocus();
+            dualWheelView.postInvalidate();
+        }
     }
 
     /** Launcher settings' change count (Config.SETTINGS_REVISION_KEY); onResume rebuilds Home when it moved. */
@@ -1298,6 +1314,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onPause() {
         super.onPause();
+        if (dualWheelView != null) {
+            dualWheelView.onTvScreenOff();
+        }
         resumed = false;
         // No UP reaches a paused Home, so a vendor-key hold it saw go down would still open its app later.
         // Only Home's own share is dropped: a key service that saw the same DOWN keeps its hold.
@@ -1327,6 +1346,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onStop() {
         super.onStop();
+        if (dualWheelView != null) {
+            dualWheelView.onTvScreenOff();
+        }
         started = false;
         unregisterReceiver(timeReceiver);
         clockRefresh.stop();
@@ -1424,6 +1446,19 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // taken after that would arm one nothing releases.
         if (resumed && event.getKeyCode() >= 1000 && RemoteKeys.handle(this, event, homeAppKeys.get(event.getKeyCode()),
                 homeHoldAppKeys.get(event.getKeyCode()))) return true;
+        if (dualWheelView != null) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (dualWheelView.onKeyDown(event.getKeyCode(), event)) return true;
+            } else if (event.getAction() == KeyEvent.ACTION_UP) {
+                int c = event.getKeyCode();
+                if (c == KeyEvent.KEYCODE_DPAD_UP || c == KeyEvent.KEYCODE_DPAD_DOWN
+                        || c == KeyEvent.KEYCODE_DPAD_LEFT || c == KeyEvent.KEYCODE_DPAD_RIGHT
+                        || c == KeyEvent.KEYCODE_DPAD_CENTER || c == KeyEvent.KEYCODE_ENTER
+                        || c == KeyEvent.KEYCODE_NUMPAD_ENTER || c == KeyEvent.KEYCODE_BACK) {
+                    return true;
+                }
+            }
+        }
         if (handleSettingsKey(event)) return true;
         if (holdOk(event)) return true;
         if (tileMenuEnabled && !reordering && openPopup == null && cardPrompt == null

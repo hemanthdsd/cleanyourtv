@@ -404,11 +404,21 @@ final class RemoteKeys {
         return target != null && inputId(target) == null && target.indexOf('/') > 0;
     }
 
+    private static long lastLaunchTimeMs = 0L;
+    private static String lastLaunchTarget = "";
+
     /** Opens an app from a remote button: its TV entry if it has one, else its phone entry. An "input:<id>" target
      *  switches to that TV input (an HDMI port) instead, an action word runs that action, and a
      *  "package/.Activity" target opens that activity. */
     static void launch(Context ctx, String pkg) {
-        if (pkg == null || runAction(ctx, pkg)) return;
+        if (pkg == null) return;
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (pkg.equals(lastLaunchTarget) && (now - lastLaunchTimeMs) < 400L) {
+            return;
+        }
+        lastLaunchTimeMs = now;
+        lastLaunchTarget = pkg;
+        if (runAction(ctx, pkg)) return;
         if (INPUTS.equals(pkg)) {
             // This launcher's own Inputs menu, as InputsRequestActivity opens it: addressed to Home directly, so a
             // vendor input picker that also answers VIEW_INPUTS never turns it into a chooser.

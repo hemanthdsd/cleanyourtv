@@ -126,7 +126,7 @@
          "key_filter"). Some firmware (TCL Google TV on Android 12) drops key auto-repeat once ANY service
          filters keys, so long-pressing volume only steps once: set false and the service keeps running but
          stops filtering, which brings repeat back at the price of the remote buttons below doing nothing. -->
-    <bool name="key_filter">true</bool>
+    <bool name="key_filter">false</bool>
 
     <!-- With key_filter on, true makes HomeKeyService and InputKeyService stop filtering keys while a game
          controller is connected, so games see its buttons (Steam Link with an Xbox controller on a TCL G07
@@ -166,6 +166,7 @@
          a temporary `Log.d` in the helper's `onKeyEvent`: `getKeyCode()`, `getScanCode()`, `getDeviceId()`, read
          after a HOME_KEY_SERVICE=1 rebuild. Leave empty to omit. -->
     <integer-array name="settings_key_keycodes">
+        <item>83</item>
     </integer-array>
     <!-- What those Settings buttons open: false, the TV's Settings; true, a small glass panel at the top right
          with TV settings, Display, Network, Apps (re-enable an app) and Launcher settings, over whatever is on screen.
@@ -176,7 +177,7 @@
          off the enabled list. true: Home puts the helpers that were running back when it starts; one turned off in
          Settings stays off. Needs WRITE_SECURE_SETTINGS, which build-and-install grants with RESTORE_KEY_SERVICES=1
          (-RestoreKeyServices on Windows) and takes back on an install without it. Can also be set with "restore_key_services": true in a theme's config.json. -->
-    <bool name="restore_key_services">false</bool>
+    <bool name="restore_key_services">true</bool>
 
     <!-- More remote buttons that open the input switcher, by Android keycode (INPUT_KEY_SERVICE=1
          build-and-install.sh; KEYCODE_TV always does). For buttons only a disabled app answered: the Xiaomi
@@ -220,6 +221,63 @@
          where the firmware hands KEYCODE_GUIDE (172) to the stock launcher and no app ever receives it. Leave empty
          to omit. -->
     <string-array name="app_keys" translatable="false">
+        <!-- YouTube direct remote button (TCL G10 keyCode 4065 / scanCode 245 / standard 190) -->
+        <item>4065:com.google.android.youtube.tv</item>
+        <item>190:com.google.android.youtube.tv</item>
+        <item>KEYCODE_TCL_YOUTUBE:com.google.android.youtube.tv</item>
+        <item>KEYCODE_TCL_FORCE_YOUTUBE:com.google.android.youtube.tv</item>
+        <item>scan:245:com.google.android.youtube.tv</item>
+
+        <!-- Netflix direct remote button (TCL G10 keyCode 4062 / scanCode 242 / standard 191) -->
+        <item>4062:com.netflix.ninja</item>
+        <item>191:com.netflix.ninja</item>
+        <item>KEYCODE_TCL_NETFLIX:com.netflix.ninja</item>
+        <item>KEYCODE_TCL_FORCE_NETFLIX:com.netflix.ninja</item>
+        <item>scan:242:com.netflix.ninja</item>
+
+        <!-- Prime Video direct remote button (TCL G10 keyCode 4099 / scanCode 752 / standard 195) -->
+        <item>4099:com.amazon.amazonvideo.livingroom</item>
+        <item>195:com.amazon.amazonvideo.livingroom</item>
+        <item>KEYCODE_TCL_PRIMEVIDEO:com.amazon.amazonvideo.livingroom</item>
+        <item>KEYCODE_TCL_FORCE_AMAZON:com.amazon.amazonvideo.livingroom</item>
+        <item>scan:752:com.amazon.amazonvideo.livingroom</item>
+
+        <!-- Disney+ direct remote button (TCL scanCode 762) -->
+        <item>KEYCODE_TCL_DISNEY:com.disney.disneyplus</item>
+        <item>scan:762:com.disney.disneyplus</item>
+
+        <!-- Apple TV direct remote button (TCL scanCode 652) -->
+        <item>KEYCODE_TCL_APPLETV:com.apple.atve.androidtv.appletv</item>
+        <item>scan:652:com.apple.atve.androidtv.appletv</item>
+
+        <!-- TCL Channel / Free TV direct remote button (TCL G10 keyCode 4020 / scanCode 227, 345, 650) -->
+        <item>4020:com.tcl.channelplus</item>
+        <item>KEYCODE_TCL_CHANNELPLUS:com.tcl.channelplus</item>
+        <item>KEYCODE_TCL_TVPLUS:com.tcl.channelplus</item>
+        <item>scan:227:com.tcl.channelplus</item>
+        <item>scan:345:com.tcl.channelplus</item>
+        <item>scan:650:com.tcl.channelplus</item>
+
+        <!-- BrowseHere / Web Browser button (TCL scanCode 651) -->
+        <item>KEYCODE_TCL_BROWSEHERE:com.hisense.odinbrowser</item>
+        <item>scan:651:com.hisense.odinbrowser</item>
+
+        <!-- USB Media button (TCL scanCode 236) -->
+        <item>KEYCODE_TCL_USB_MENU:com.tcl.ui_mediaCenter</item>
+        <item>scan:236:com.tcl.ui_mediaCenter</item>
+
+        <!-- Settings / Gear button (keyCode 83 KEYCODE_NOTIFICATION / scanCode 233) -->
+        <item>83:settings</item>
+        <item>KEYCODE_NOTIFICATION:settings</item>
+        <item>176:settings</item>
+        <item>KEYCODE_SETTINGS:settings</item>
+        <item>scan:233:settings</item>
+
+        <!-- Guide / EPG button -->
+        <item>172:com.tcl.tv</item>
+        <item>KEYCODE_GUIDE:com.tcl.tv</item>
+        <item>KEYCODE_TCL_EPG:com.tcl.tv</item>
+        <item>scan:365:com.tcl.tv</item>
     </string-array>
 
     <!-- Package of the stock launcher, for TVs whose firmware turns it back on after it was disabled. XGIMI's
